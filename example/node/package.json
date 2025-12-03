@@ -1,0 +1,21 @@
+{
+    "name": "tiktok-live-client",
+    "version": "1.0.0",
+    "description": "TikTok Live WebSocket Client",
+    "main": "websocket-client.js",
+    "scripts": {
+        "start": "node websocket-client.js",
+        "test": "node websocket-client.js 7514168917980400426"
+    },
+    "dependencies": {
+        "ws": "^8.14.2"
+    },
+    "keywords": [
+        "tiktok",
+        "live",
+        "websocket",
+        "client"
+    ],
+    "author": "TikHub.IO",
+    "license": "MIT"
+}
