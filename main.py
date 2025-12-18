@@ -2,7 +2,6 @@ import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import quote
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -10,7 +9,7 @@ from crawler.websocket import DouyinWebSocketCrawler
 from log.logger import logger
 from model.tiktok import LiveWebcast
 from utils.config import Config
-from utils.token import fetch_check_live_alive, fetch_live_im_fetch, gen_ttwid
+from utils.token import fetch_check_live_alive
 
 
 # 创建 lifespan 上下文管理器
@@ -55,7 +54,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 "status": "connecting",
                 "message": "连接已建立，正在初始化...",
                 "step": 1,
-                "total_steps": 5,
+                "total_steps": 4,
             }
         )
     )
@@ -85,7 +84,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     "status": "creating_crawler",
                     "message": "正在创建直播爬虫实例...",
                     "step": 2,
-                    "total_steps": 5,
+                    "total_steps": 4,
                 }
             )
         )
@@ -136,20 +135,22 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     "status": "getting_token",
                     "message": "正在获取访问令牌...",
                     "step": 3,
-                    "total_steps": 5,
+                    "total_steps": 4,
                 }
             )
         )
 
         kwargs = {
             "headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.0.0",
-                "Upgrade": "websocket",
-                "Connection": "Upgrade",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
+                "Origin": "https://www.tiktok.com",
+                "Cache-Control": "no-cache",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                "Pragma": "no-cache",
             },
             "proxies": {"http://": None, "https://": None},
             "timeout": 60,
-            "cookie": Config.WSS_COOKIES,  # 使用配置中的WSS_COOKIES
+            "cookie": Config.WSS_COOKIES,
         }
 
         # 创建爬虫实例
@@ -157,7 +158,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
         # 设置消息类型回调字典
         wss_callbacks = {
-            "WebcastGiftMessage": crawler.WebcastGiftMessage,
+            "WebcastChatMessage": crawler.WebcastChatMessage,
             # 最后添加广播回调
             "broadcast": broadcast_callback,
         }
@@ -175,7 +176,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     "status": "checking_live",
                     "message": "正在检查直播状态...",
                     "step": 4,
-                    "total_steps": 5,
+                    "total_steps": 4,
                 }
             )
         )
@@ -213,108 +214,17 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             await websocket.close()
             return
 
-        # 获取直播信息
-        await websocket.send_text(
-            json.dumps(
-                {
-                    "status": "getting_live_info",
-                    "message": "正在获取直播间信息...",
-                    "step": 5,
-                    "total_steps": 5,
-                }
-            )
-        )
-
-        # 获取直播信息
-        LiveImFetch = await fetch_live_im_fetch(room_id=room_id, user_unique_id="")
-        # 检查LiveImFetch是否为None或空值
-        if not LiveImFetch:
-            logger.error(f"[WebSocket] [❌ 获取直播信息失败] | [房间ID: {room_id}]")
-            await websocket.send_text(
-                json.dumps(
-                    {
-                        "error": "无法获取直播信息",
-                        "detail": "直播可能已经结束或房间不存在，请确认房间ID正确且主播正在直播中",
-                    }
-                )
-            )
-            # 主动断开连接
-            await websocket.close()
-            return
-
-        # 处理LiveImFetch，确保它是字典类型
-        if isinstance(LiveImFetch, str):
-            try:
-                LiveImFetch = json.loads(LiveImFetch)
-            except json.JSONDecodeError:
-                logger.error(
-                    f"[WebSocket] [❌ 解析直播信息失败] | [房间ID: {room_id}] | [内容: {LiveImFetch}]"
-                )
-                await websocket.send_text(
-                    json.dumps(
-                        {
-                            "error": "解析直播信息失败",
-                            "detail": "服务器返回的数据格式不正确",
-                        }
-                    )
-                )
-                # 主动断开连接
-                await websocket.close()
-                return
-        elif not isinstance(LiveImFetch, dict):
-            logger.error(
-                f"[WebSocket] [❌ 直播信息格式错误] | [房间ID: {room_id}] | [内容: {LiveImFetch}]"
-            )
-            await websocket.send_text(
-                json.dumps(
-                    {
-                        "error": "直播信息格式错误",
-                        "detail": "服务器返回的数据格式不正确",
-                    }
-                )
-            )
-            # 主动断开连接
-            await websocket.close()
-            return
-
-        cursor = LiveImFetch.get("cursor", "")
-        internal_ext = LiveImFetch.get("internalExt", "")
-        wrss = LiveImFetch.get("routeParams", {}).get("wrss", "")
-
-        # 验证wrss是否为空
-        if not wrss:
-            logger.error(
-                f"[WebSocket] [❌ wrss参数为空] | [房间ID: {room_id}] | "
-                f"[这将导致弹幕连接失败，请检查API返回数据]"
-            )
-            await websocket.send_text(
-                json.dumps(
-                    {
-                        "error": "直播信息不完整",
-                        "detail": "缺少必要的WebSocket路由参数(wrss)，无法建立弹幕连接",
-                    }
-                )
-            )
-            # 主动断开连接
-            await websocket.close()
-            return
-
-        # 移除生成签名的步骤
-        params = LiveWebcast(
-            room_id=room_id,
-            internal_ext=quote(internal_ext, safe=""),
-            cursor=cursor,
-            wrss=wrss,
-        )
+        # 构建WebSocket连接参数 (webcast-ws 接口)
+        params = LiveWebcast(room_id=room_id)
 
         # 发送连接成功消息
         await websocket.send_text(
             json.dumps(
                 {
                     "status": "connected",
-                    "message": "🎉 连接成功！等待接收直播礼物消息...",
-                    "step": 5,
-                    "total_steps": 5,
+                    "message": "🎉 连接成功！等待接收直播弹幕消息...",
+                    "step": 4,
+                    "total_steps": 4,
                 }
             )
         )
@@ -412,8 +322,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 {
                     "status": "connected",
                     "message": "🎉 连接成功！直播爬虫已在运行中...",
-                    "step": 5,
-                    "total_steps": 5,
+                    "step": 4,
+                    "total_steps": 4,
                 }
             )
         )

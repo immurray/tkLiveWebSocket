@@ -40,7 +40,9 @@ async def fetch_live_im_fetch(
             wrss = data.get("routeParams", {}).get("wrss", "") if data else ""
 
             if wrss:
-                logger.info(f"[FetchLiveImFetch] [✅ 成功获取wrss] | [尝试次数：{retry_count + 1}]")
+                logger.info(
+                    f"[FetchLiveImFetch] [✅ 成功获取wrss] | [尝试次数：{retry_count + 1}]"
+                )
                 return data
             else:
                 retry_count += 1
@@ -50,6 +52,7 @@ async def fetch_live_im_fetch(
                 )
                 if retry_count < max_retries:
                     import asyncio
+
                     await asyncio.sleep(1)  # 等待1秒后重试
                 continue
         else:

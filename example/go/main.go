@@ -22,6 +22,7 @@ type Message struct {
     Type        string `json:"type,omitempty"`
     Action      string `json:"action,omitempty"`
     Message     string `json:"message,omitempty"`
+    Content     string `json:"content,omitempty"`
     Step        int    `json:"step,omitempty"`
     TotalSteps  int    `json:"total_steps,omitempty"`
     Timestamp   int64  `json:"timestamp,omitempty"`
@@ -168,8 +169,15 @@ func (c *TikTokLiveClient) handleMessage(message Message) {
         case "server_activity":
             fmt.Printf("📊 [%s] 服务器活动: %s\n", timestamp, message.Details)
         default:
-            // 处理礼物消息或其他数据
-            if message.User != nil && message.Gift != nil {
+            // 处理聊天消息
+            if message.User != nil && message.Content != "" {
+                user := message.User.Nickname
+                if user == "" {
+                    user = "未知用户"
+                }
+                fmt.Printf("💬 [%s] %s: %s\n", timestamp, user, message.Content)
+            } else if message.User != nil && message.Gift != nil {
+                // 处理礼物消息
                 user := message.User.Nickname
                 if user == "" {
                     user = "未知用户"

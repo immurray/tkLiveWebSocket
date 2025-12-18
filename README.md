@@ -1,25 +1,24 @@
-## README.md 文档
+# tkLiveWebSocket
 
-# TikHub WebCast Live
-
-TikHub WebCast Live 是一个高性能的TikTok直播弹幕和互动消息采集与转发服务。该服务建立与TikTok直播的WebSocket连接，实时获取直播间的聊天消息、点赞、礼物等互动数据，并通过WebSocket接口提供给客户端使用。
+tkLiveWebSocket 是一个高性能的 TikTok 直播弹幕和互动消息采集与转发服务。该服务建立与 TikTok 直播的 WebSocket 连接，实时获取直播间的聊天消息、礼物等互动数据，并通过 WebSocket 接口提供给客户端使用。
 
 ## 功能特点
 
-- 实时采集TikTok直播间弹幕和互动消息
-- 支持多房间同时监听
-- WebSocket消息转发，便于前端实时展示
+- 实时采集 TikTok 直播间弹幕和互动消息
+- 支持多房间同时监听，多客户端共享同一爬虫实例
+- WebSocket 消息转发，便于前端实时展示
 - 可扩展的消息处理回调机制
-- 自动维护WebSocket连接和重连
-- 支持通过代理服务器连接
+- 自动维护 WebSocket 连接和重连（最多 3 次重试）
+- 自动清理无活跃连接的房间资源（5 分钟超时）
+- 支持心跳检测，保持连接稳定
 
 ## 技术架构
 
 - **后端框架**：FastAPI
 - **WebSocket**：websockets
 - **消息解析**：Protocol Buffers (protobuf)
-- **HTTP客户端**：httpx
-- **日志系统**：自定义logger
+- **HTTP 客户端**：httpx
+- **日志系统**：自定义 logger
 
 ## 快速开始
 
@@ -32,8 +31,8 @@ TikHub WebCast Live 是一个高性能的TikTok直播弹幕和互动消息采集
 
 1. 克隆代码库
 ```bash
-git clone https://github.com/TikHubIO/tkliveTools.git
-cd tkliveTools
+git clone https://github.com/JohnserfSeed/tkLiveWebSocket.git
+cd tkLiveWebSocket
 ```
 
 2. 安装依赖
@@ -44,7 +43,7 @@ pip install -r requirements.txt
 3. 配置环境变量
 ```bash
 cp .env.example .env
-# 编辑.env文件，填入你的TIKHUB_API_KEY
+# 编辑 .env 文件，填入你的 TIKHUB_API_KEY
 ```
 
 ### 运行服务
@@ -66,11 +65,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 3
 
 ### 使用方法
 
-连接WebSocket端点获取特定房间的消息：
+连接 WebSocket 端点获取特定房间的消息：
 
 ```javascript
-// 前端JavaScript示例
-const roomId = "123456789"; // TikTok直播间ID
+// 前端 JavaScript 示例
+const roomId = "7514168917980400426"; // TikTok 直播间 ID
 const ws = new WebSocket(`ws://localhost:8000/ws/${roomId}`);
 
 ws.onmessage = (event) => {
@@ -79,58 +78,72 @@ ws.onmessage = (event) => {
 };
 
 ws.onclose = () => {
-  console.log("WebSocket连接关闭");
+  console.log("WebSocket 连接关闭");
 };
 
 ws.onerror = (error) => {
-  console.error("WebSocket错误:", error);
+  console.error("WebSocket 错误:", error);
 };
 ```
 
-## API文档
+## API 文档
 
-### WebSocket端点
+### HTTP 端点
 
-#### `/ws/{room_id}`
+#### `GET /`
 
-建立WebSocket连接以接收指定直播间的消息。
+健康检查端点。
+
+- **返回**：`{"msg": "Hello, TikHubIO!"}`
+
+### WebSocket 端点
+
+#### `WS /ws/{room_id}`
+
+建立 WebSocket 连接以接收指定直播间的消息。
 
 - **参数**
-  - `room_id`: TikTok直播间ID
+  - `room_id`: TikTok 直播间 ID
 
-- **返回数据**
-  - 各类消息的JSON格式数据，包括：
-    - 聊天消息 (WebcastChatMessage)
-    - 礼物消息 (WebcastGiftMessage)
-    - 点赞消息 (WebcastLikeMessage)
-    - 用户进入消息 (WebcastMemberMessage)
-    - 关注消息 (WebcastSocialMessage)
-    - 观众排行榜 (WebcastRoomUserSeqMessage)
-    - 连麦相关消息 (WebcastLinkMicMethod, WebcastLinkMessage, etc.)
-    - 购物消息 (WebcastOecLiveShoppingMessage)
-    - 等其他直播间互动消息
+- **连接流程**
+  1. `connecting` - 连接已建立，正在初始化
+  2. `creating_crawler` - 正在创建直播爬虫实例
+  3. `getting_token` - 正在获取访问令牌
+  4. `checking_live` - 正在检查直播状态
+  5. `connected` - 连接成功，等待接收消息
+
+- **客户端消息格式**
+  ```json
+  // 心跳消息
+  {"type": "ping", "timestamp": 1702345678000}
+
+  // 关闭连接
+  {"action": "close", "type": "close"}
+  ```
+
+- **服务端消息格式**
+  ```json
+  // 状态消息
+  {"status": "connected", "message": "连接成功！", "step": 4, "total_steps": 4}
+
+  // 心跳响应
+  {"type": "pong", "timestamp": 1702345678000}
+
+  // 聊天消息
+  {"user": {"nickname": "用户名"}, "content": "消息内容"}
+
+  // 错误消息
+  {"error": "错误描述", "detail": "详细信息", "reconnect": true}
+  ```
 
 ## 自定义消息处理
 
-可以通过修改 main.py 中的 `wss_callbacks` 字典来自定义不同类型消息的处理方式：
+可以通过修改 `main.py` 中的 `wss_callbacks` 字典来自定义不同类型消息的处理方式：
 
 ```python
 wss_callbacks = {
-    "WebcastGiftMessage": crawler.WebcastGiftMessage,          # 礼物消息
-    "WebcastChatMessage": crawler.WebcastChatMessage,          # 聊天消息
-    "WebcastLikeMessage": crawler.WebcastLikeMessage,          # 点赞消息
-    "WebcastMemberMessage": crawler.WebcastMemberMessage,      # 用户进入消息
-    "WebcastSocialMessage": crawler.WebcastSocialMessage,      # 关注消息
-    "WebcastRoomUserSeqMessage": crawler.WebcastRoomUserSeqMessage,  # 观众排行榜
-    "WebcastLinkMicFanTicketMethod": crawler.WebcastLinkMicFanTicketMethod,  # 连麦粉丝票
-    "WebcastLinkMicMethod": crawler.WebcastLinkMicMethod,       # 连麦消息
-    "UserFanTicket": crawler.UserFanTicket,                   # 用户粉丝团消息
-    "WebcastLinkMessage": crawler.WebcastLinkMessage,          # 连麦链接消息
-    "WebcastLinkMicBattle": crawler.WebcastLinkMicBattle,      # 连麦对决
-    "WebcastLinkLayerMessage": crawler.WebcastLinkLayerMessage,  # 连麦层信息
-    "WebcastRoomMessage": crawler.WebcastRoomMessage,          # 直播间消息
-    "WebcastOecLiveShoppingMessage": crawler.WebcastOecLiveShoppingMessage,  # 购物消息
-    "broadcast": broadcast_callback,  # 广播回调
+    "WebcastChatMessage": crawler.WebcastChatMessage,  # 聊天消息
+    "broadcast": broadcast_callback,                    # 广播回调
 }
 ```
 
@@ -139,19 +152,6 @@ wss_callbacks = {
 | 消息类型 | 描述 | 包含数据示例 |
 |---------|------|-------------|
 | `WebcastChatMessage` | 聊天消息 | 用户昵称、消息内容 |
-| `WebcastGiftMessage` | 礼物消息 | 用户昵称、礼物名称、礼物价值 |
-| `WebcastLikeMessage` | 点赞消息 | 用户昵称、点赞数量 |
-| `WebcastMemberMessage` | 用户进入消息 | 用户昵称、进入时间 |
-| `WebcastSocialMessage` | 关注消息 | 用户昵称、关注动作 |
-| `WebcastRoomUserSeqMessage` | 观众排行榜 | 在线观众排名信息 |
-| `WebcastLinkMicFanTicketMethod` | 连麦粉丝票 | 粉丝票相关信息 |
-| `WebcastLinkMicMethod` | 连麦消息 | 连麦操作信息 |
-| `UserFanTicket` | 用户粉丝团 | 粉丝团相关信息 |
-| `WebcastLinkMessage` | 连麦链接 | 连麦链接信息 |
-| `WebcastLinkMicBattle` | 连麦对决 | 连麦对决信息 |
-| `WebcastLinkLayerMessage` | 连麦层信息 | 连麦层级信息 |
-| `WebcastRoomMessage` | 直播间消息 | 房间状态信息 |
-| `WebcastOecLiveShoppingMessage` | 购物消息 | 商品信息、购买动作 |
 
 ### 错误处理
 
@@ -159,18 +159,33 @@ wss_callbacks = {
 - **空数据检查**：当接收到空数据时，返回标准错误格式
 - **异常捕获**：解析失败时返回详细的错误信息
 - **日志记录**：所有操作都有相应的日志记录
+- **自动重连**：网络异常时自动重试，最多 3 次
 
 错误返回格式：
 ```json
 {
   "error": "错误类型描述",
-  "details": "详细错误信息"
+  "detail": "详细错误信息",
+  "suggestion": "建议操作",
+  "reconnect": true
 }
 ```
 
-### 性能优化
+## 客户端示例
 
-- 所有消息处理方法都使用 `@classmethod` 装饰器提高性能
-- 统一的错误处理减少重复代码
-- 详细的日志记录便于调试和监控
-- 标准化的返回格式便于客户端处理
+项目提供了多种语言的客户端示例，详见 [examples.md](examples.md)：
+
+- **Node.js**：完整的事件驱动客户端，支持心跳、自动重连
+- **Go**：交互式命令行客户端，支持手动发送命令
+- **Java**：基于 Java-WebSocket 的客户端示例
+- **Python**：简单的 websocket-client 示例
+
+示例代码位于 `example/` 目录下。
+
+## 如何获取房间 ID
+
+**TikTok 直播间 ID 获取方法：**
+
+1. 打开 TikTok 直播页面
+2. 查看浏览器地址栏 URL，房间 ID 通常在 URL 中
+3. 或者使用 TikHub API 的相关接口获取

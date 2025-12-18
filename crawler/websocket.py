@@ -29,6 +29,8 @@ from proto.tiktok.tiktok_webcast_pb2 import (
     MemberMessage,
     SocialMessage,
     LinkMicFanTicketMethod,
+    HeartBeat,
+    EnterRoom,
 )
 from utils.endpoint import BaseEndpointManager
 
@@ -38,7 +40,9 @@ class DouyinWebSocketCrawler:
     def __init__(self, kwargs: Optional[dict] = None, callbacks: Optional[dict] = None):
         # 需要与cli同步
         kwargs = kwargs or {}
-        self.headers = kwargs.get("headers", {}) | {"Cookie": kwargs.get("cookie", {})}
+        self.headers = kwargs.get("headers", {})
+        if kwargs.get("cookie"):
+            self.headers["Cookie"] = kwargs.get("cookie")
         self.callbacks = callbacks or {}
         # 保留原始的broadcast回调，同时保留其他消息类型回调
         self.broadcast_callback = self.callbacks.get("broadcast", None)
@@ -261,7 +265,7 @@ class DouyinWebSocketCrawler:
 
     async def fetch_live_danmaku(self, params: LiveWebcast) -> None:
         endpoint = BaseEndpointManager.model_2_endpoint(
-            "wss://webcast16-ws-alisg.tiktok.com/webcast/im/ws_proxy/ws_reuse_supplement/",
+            "wss://webcast-ws.tiktok.com/webcast/im/ws_proxy/ws_reuse_supplement/",
             params.model_dump(),
         )
         logger.info(
@@ -269,7 +273,119 @@ class DouyinWebSocketCrawler:
         )
 
         await self.connect_websocket(endpoint)
-        await self.receive_messages()  # 只需要这两步
+
+        # 连接成功后发送初始化消息
+        await self.send_heartbeat(params.room_id)
+        await self.send_enter_room(params.room_id)
+
+        await self.receive_messages()
+
+    async def send_heartbeat(self, room_id: str) -> None:
+        """发送心跳消息"""
+        if self.websocket is None or self.websocket.closed:
+            logger.warning(
+                "[SendHeartbeat] [❌ 无法发送心跳] | [WebSocket 未连接或已关闭]"
+            )
+            return
+
+        try:
+            # 创建心跳消息 - 实际传的是 room_id
+            heartbeat = HeartBeat()
+            heartbeat.room_id = int(room_id)
+
+            # 创建 PushFrame
+            frame = PushFrame()
+            frame.payload_encoding = "pb"
+            frame.payload_type = "hb"
+            frame.payload = heartbeat.SerializeToString()
+
+            data = frame.SerializeToString()
+            logger.info(f"[SendHeartbeat] [💓 发送心跳消息] | [room_id: {room_id}]")
+            await self.websocket.send(data)
+        except Exception as e:
+            logger.error(f"[SendHeartbeat] [⚠️ 发送失败] | [错误: {str(e)}]")
+
+    async def send_enter_room(self, room_id: str) -> None:
+        """发送进入房间消息"""
+        if self.websocket is None or self.websocket.closed:
+            logger.warning(
+                "[SendEnterRoom] [❌ 无法发送进入房间消息] | [WebSocket 未连接或已关闭]"
+            )
+            return
+
+        try:
+            # 手动构造 EnterRoom payload 以确保包含所有字段（包括空值）
+            # 参考原始数据格式
+            payload = self._build_enter_room_payload(int(room_id))
+
+            # 创建 PushFrame
+            frame = PushFrame()
+            frame.payload_encoding = "pb"
+            frame.payload_type = "im_enter_room"
+            frame.payload = payload
+
+            data = frame.SerializeToString()
+            logger.info(f"[SendEnterRoom] [🚪 发送进入房间消息] | [room_id: {room_id}]")
+            await self.websocket.send(data)
+        except Exception as e:
+            logger.error(f"[SendEnterRoom] [⚠️ 发送失败] | [错误: {str(e)}]")
+
+    def _build_enter_room_payload(self, room_id: int) -> bytes:
+        """
+        手动构造 EnterRoom payload，确保包含所有必需字段
+
+        EnterRoom proto 定义 (来自 TikTok JS):
+            int64 room_id = 1;
+            string room_tag = 2;
+            string live_region = 3;
+            int64 live_id = 4;
+            string identity = 5;
+            string cursor = 6;
+            int64 account_type = 7;
+            int64 enter_uniq_id = 8;
+            string filter_welcome_msg = 9;
+            bool is_anchor_continue_keep_msg = 10;
+        """
+        import io
+
+        def write_varint(buf: io.BytesIO, value: int):
+            # 处理负数和超大数（int64）
+            if value < 0:
+                value = value + (1 << 64)
+            while value > 0x7F:
+                buf.write(bytes([0x80 | (value & 0x7F)]))
+                value >>= 7
+            buf.write(bytes([value]))
+
+        def write_field_varint(buf: io.BytesIO, field_num: int, value: int):
+            tag = (field_num << 3) | 0  # wire type 0 = varint
+            write_varint(buf, tag)
+            write_varint(buf, value)
+
+        def write_field_string(buf: io.BytesIO, field_num: int, value: str):
+            tag = (field_num << 3) | 2  # wire type 2 = length-delimited
+            write_varint(buf, tag)
+            data = value.encode("utf-8")
+            write_varint(buf, len(data))
+            buf.write(data)
+
+        buf = io.BytesIO()
+        # Field 1: room_id (int64)
+        write_field_varint(buf, 1, room_id)
+        # Field 4: live_id (int64) = 12
+        write_field_varint(buf, 4, 12)
+        # Field 5: identity (string) = "audience"
+        write_field_string(buf, 5, "audience")
+        # Field 6: cursor (string) = "" (空字符串也需要发送)
+        write_field_string(buf, 6, "")
+        # Field 7: account_type (int64) = 0
+        write_field_varint(buf, 7, 0)
+        # Field 9: filter_welcome_msg (string) = "0"
+        write_field_string(buf, 9, "0")
+        # Field 10: is_anchor_continue_keep_msg (bool/varint) = 0/false
+        write_field_varint(buf, 10, 0)
+
+        return buf.getvalue()
 
     async def handle_wss_message(self, message: bytes) -> None:
         """处理 WebSocket 消息"""
@@ -425,7 +541,7 @@ class DouyinWebSocketCrawler:
             )
             nick_name = data_json.get("user").get("nickname", "N/A")
             gift_name = data_json.get("gift").get("describe", "N/A")
-            gift_price = data_json.get("gift").get("diamondCount", "N/A")
+            gift_price = data_json.get("gift").get("diamond_count", "N/A")
 
             logger.info(
                 f"[WebcastGiftMessage] [🎁直播间礼物] [用户：{nick_name} 送出了 {gift_name} 价值 {gift_price} 钻石]"

@@ -1,8 +1,6 @@
-## deployment.md 文档
+# tkLiveWebSocket 部署指南
 
-# TikliveTools 部署指南
-
-本文档提供了在各种环境下部署 TikliveTools（TikTok/抖音直播数据采集工具）服务的详细指南。
+本文档提供了在各种环境下部署 tkLiveWebSocket（TikTok 直播弹幕采集与转发服务）的详细指南。
 
 ## 目录
 
@@ -131,8 +129,8 @@ docker run -d -p 8000:8000 --env-file .env --name tklivetools tklivetools
 ### 1. 克隆代码库
 
 ```bash
-git clone https://github.com/TikHubIO/tkliveTools.git
-cd tkliveTools
+git clone https://github.com/JohnserfSeed/tkLiveWebSocket.git
+cd tkLiveWebSocket
 ```
 
 ### 2. 设置Python虚拟环境(推荐)
@@ -664,16 +662,16 @@ sudo nano /etc/systemd/system/tklivetools.service
 
 ```ini
 [Unit]
-Description=TikliveTools Service
+Description=tiktok-live-chat-overlays Service
 After=network.target
 
 [Service]
 User=your-username  # 替换为你的用户名
 Group=your-username  # 替换为你的用户名
-WorkingDirectory=/path/to/tkliveTools  # 替换为项目实际路径
-Environment="PATH=/path/to/tkliveTools/venv/bin"
-EnvironmentFile=/path/to/tkliveTools/.env
-ExecStart=/path/to/tkliveTools/venv/bin/gunicorn -w 3 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8000 main:app
+WorkingDirectory=/path/to/tiktok-live-chat-overlays  # 替换为项目实际路径
+Environment="PATH=/path/to/tiktok-live-chat-overlays/venv/bin"
+EnvironmentFile=/path/to/tiktok-live-chat-overlays/.env
+ExecStart=/path/to/tiktok-live-chat-overlays/venv/bin/gunicorn -w 3 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8000 main:app
 Restart=always
 RestartSec=5
 StartLimitInterval=0
@@ -752,10 +750,10 @@ htop
    - 检查防火墙是否允许WebSocket连接
    - 验证客户端WebSocket URL格式
 
-3. **获取TikTok/抖音直播消息失败**
-   - 检查TIKHUB_API_KEY是否有效
-   - 确认提供的直播房间ID是否正确
-   - 检查WSS_COOKIES配置是否正确
+3. **获取 TikTok 直播消息失败**
+   - 检查 TIKHUB_API_KEY 是否有效
+   - 确认提供的直播房间 ID 是否正确
+   - 检查 WSS_COOKIES 配置是否正确
    - 查看日志中的详细错误信息
 
 4. **集群相关问题**
@@ -792,17 +790,11 @@ htop
 
 ### 消息处理配置
 
-服务支持以下TikTok/抖音直播消息类型的实时处理：
+服务支持以下 TikTok 直播消息类型的实时处理：
 
 | 消息类型 | 功能描述 | 性能特点 |
 |---------|----------|----------|
 | `WebcastChatMessage` | 聊天消息处理 | 高频处理，优化解析速度 |
-| `WebcastGiftMessage` | 礼物消息处理 | 包含价值计算，需要准确性 |
-| `WebcastLikeMessage` | 点赞消息处理 | 超高频处理，批量优化 |
-| `WebcastMemberMessage` | 用户进入处理 | 中频处理，用户信息解析 |
-| `WebcastSocialMessage` | 关注消息处理 | 低频处理，社交动作记录 |
-| `WebcastRoomUserSeqMessage` | 观众排行榜 | 定期更新，排序优化 |
-| `WebcastOecLiveShoppingMessage` | 购物消息处理 | 电商集成，事务安全 |
 
 所有消息处理都具备：
 - 空数据检查和验证
@@ -814,17 +806,17 @@ htop
 
 启动服务后，可以通过以下方式连接：
 
-1. **WebSocket连接**：
+1. **WebSocket 连接**：
    ```
    ws://localhost:8000/ws/{room_id}
    ```
-   其中 `{room_id}` 是TikTok/抖音直播间ID
+   其中 `{room_id}` 是 TikTok 直播间 ID
 
-2. **API接口**：
+2. **API 接口**：
    ```
    GET http://localhost:8000/
    ```
    返回服务状态信息
 
 3. **日志查看**：
-   所有日志文件存储在 `logs/` 目录下，按日期和时间命名
+   所有日志文件存储在 `log/` 目录下
